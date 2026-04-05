@@ -7,6 +7,7 @@ import logging
 import chess
 import chess.engine
 import chess.pgn
+from io import StringIO
 
 from config import settings
 from models.schemas import MoveEvalResult
@@ -55,7 +56,7 @@ async def analyze_game(pgn_text: str, depth: int | None = None) -> list[MoveEval
     depth = depth or settings.stockfish_depth
 
     # Parse PGN
-    game = chess.pgn.read_game(chess.pgn.StringIO(pgn_text))  # type: ignore[arg-type]
+    game = chess.pgn.read_game(StringIO(pgn_text))
     if game is None:
         raise ValueError("Invalid PGN: could not parse game")
 
