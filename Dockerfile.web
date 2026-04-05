@@ -25,6 +25,7 @@ ENV DATABASE_URL="postgresql://fake:fake@localhost:5432/fake"
 ENV NEXTAUTH_SECRET="build-time-placeholder"
 ENV NEXTAUTH_URL="http://localhost:3000"
 ENV ANALYSIS_SERVICE_URL="http://localhost:8000"
+ENV NEXT_PUBLIC_ANALYSIS_URL="https://chesslens-api.salmonbeach-6ce8e8ff.eastus2.azurecontainerapps.io"
 RUN npx next build
 
 # Production image

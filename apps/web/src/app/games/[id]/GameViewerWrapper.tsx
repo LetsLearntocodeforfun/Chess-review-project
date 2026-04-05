@@ -55,7 +55,7 @@ export function GameViewerWrapper({
   return (
     <div className="flex flex-col gap-6 xl:flex-row">
       <div className="flex-1">
-        <GameViewer pgn={pgn} gameId={gameId} />
+        <GameViewer pgn={pgn} />
       </div>
       <div className="w-full xl:max-w-sm">
         <div className="rounded-lg border border-border bg-card">
