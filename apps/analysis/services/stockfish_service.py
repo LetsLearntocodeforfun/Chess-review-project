@@ -158,24 +158,6 @@ async def analyze_game(pgn_text: str, depth: int | None = None) -> list[MoveEval
 
     finally:
         await engine.quit()
-                    fen=fen_after,
-                    evalBefore=prev_cp,
-                    evalAfter=curr_cp,
-                    mateBefore=prev_mate,
-                    mateAfter=curr_mate,
-                    bestMove=best_move_san,
-                    bestLine=best_line,
-                    classification=classification,
-                    cpLoss=cp_loss,
-                )
-            )
-
-            # Update previous eval for next iteration
-            prev_cp = curr_cp
-            prev_mate = curr_mate
-
-    finally:
-        await engine.quit()
 
     return results
 
