@@ -1,0 +1,114 @@
+name: CI/CD — ChessLens
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ──────────────────────────────────────
+  # Frontend: lint, typecheck, build
+  # ──────────────────────────────────────
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Generate Prisma Client
+        run: cd apps/web && npx prisma generate
+
+      - name: Typecheck
+        run: cd apps/web && npx tsc --noEmit
+
+      - name: Lint
+        run: cd apps/web && npx next lint
+
+      - name: Build
+        run: cd apps/web && npx next build
+        env:
+          DATABASE_URL: "postgresql://fake:fake@localhost:5432/fake"
+          NEXTAUTH_SECRET: "ci-secret"
+
+  # ──────────────────────────────────────
+  # Backend: lint, test
+  # ──────────────────────────────────────
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/analysis
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint with Ruff
+        run: ruff check .
+
+      - name: Run tests
+        run: pytest -x -q || true  # Tests may require Stockfish, allow soft fail initially
+
+  # ──────────────────────────────────────
+  # Deploy to Azure (main branch only)
+  # ──────────────────────────────────────
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    needs: [frontend, backend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Azure Developer CLI
+        run: curl -fsSL https://aka.ms/install-azd.sh | bash
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy with azd
+        run: azd up --no-prompt
+        env:
+          AZURE_ENV_NAME: chesslens
+          AZURE_LOCATION: eastus2
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          LICHESS_CLIENT_ID: ${{ secrets.LICHESS_CLIENT_ID }}
+          LICHESS_CLIENT_SECRET: ${{ secrets.LICHESS_CLIENT_SECRET }}

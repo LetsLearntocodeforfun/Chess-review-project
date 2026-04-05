@@ -1,0 +1,114 @@
+services:
+  # ---------- PostgreSQL ----------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: chesslens
+      POSTGRES_USER: chesslens
+      POSTGRES_PASSWORD: chesslens
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chesslens"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------- Redis ----------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------- Next.js Frontend ----------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://chesslens:chesslens@postgres:5432/chesslens
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-secret-change-in-production}
+      LICHESS_CLIENT_ID: ${LICHESS_CLIENT_ID:-}
+      LICHESS_CLIENT_SECRET: ${LICHESS_CLIENT_SECRET:-}
+      ANALYSIS_SERVICE_URL: http://analysis:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./apps/web:/app/apps/web
+      - /app/apps/web/node_modules
+      - /app/apps/web/.next
+
+  # ---------- Python Analysis Service ----------
+  analysis:
+    build:
+      context: .
+      dockerfile: Dockerfile.analysis
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://chesslens:chesslens@postgres:5432/chesslens
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      STOCKFISH_PATH: /usr/games/stockfish
+      STOCKFISH_DEPTH: ${STOCKFISH_DEPTH:-22}
+      STOCKFISH_THREADS: ${STOCKFISH_THREADS:-2}
+      STOCKFISH_HASH_MB: ${STOCKFISH_HASH_MB:-256}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-o3-mini}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-12-01-preview}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---------- Celery Worker ----------
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.analysis
+    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      DATABASE_URL: postgresql+asyncpg://chesslens:chesslens@postgres:5432/chesslens
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      STOCKFISH_PATH: /usr/games/stockfish
+      STOCKFISH_DEPTH: ${STOCKFISH_DEPTH:-22}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-o3-mini}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---------- Celery Beat (scheduler) ----------
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.analysis
+    command: celery -A tasks.celery_app beat --loglevel=info
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:

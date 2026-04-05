@@ -1,0 +1,18 @@
+name: chesslens
+metadata:
+  template: chesslens
+services:
+  web:
+    project: ./apps/web
+    language: js
+    host: appservice
+    hooks:
+      postdeploy:
+        run: npx prisma migrate deploy
+  api:
+    project: ./apps/analysis
+    language: py
+    host: appservice
+infra:
+  provider: bicep
+  path: ./infra

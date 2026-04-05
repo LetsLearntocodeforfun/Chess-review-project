@@ -1,0 +1,20 @@
+{
+  "name": "chesslens",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source chess review and analysis platform with AI coaching",
+  "license": "AGPL-3.0",
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspace=apps/web",
+    "lint": "npm run lint --workspace=apps/web",
+    "test": "npm run test --workspace=apps/web",
+    "db:migrate": "npm run db:migrate --workspace=apps/web",
+    "db:push": "npm run db:push --workspace=apps/web",
+    "db:studio": "npm run db:studio --workspace=apps/web"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
