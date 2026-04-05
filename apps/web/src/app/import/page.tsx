@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { useRouter } from "next/navigation";
+import { Chess } from "chess.js";
 import {
   Upload,
   FileText,
@@ -13,7 +14,12 @@ import {
   AlertCircle,
   BookOpen,
   GraduationCap,
+  ExternalLink,
+  Crown,
 } from "lucide-react";
+
+// Shared store for imported games (client-side, no DB needed)
+import { useImportedGames, type ImportedGame } from "@/stores/importedGamesStore";
 
 export default function ImportPage() {
   return (
@@ -37,6 +43,7 @@ export default function ImportPage() {
 
 function PgnUpload() {
   const router = useRouter();
+  const addGames = useImportedGames((s) => s.addGames);
   const [status, setStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
 
@@ -46,29 +53,24 @@ function PgnUpload() {
       if (!file) return;
 
       setStatus("uploading");
-      setMessage(`Uploading ${file.name}...`);
-
-      const formData = new FormData();
-      formData.append("file", file);
+      setMessage(`Parsing ${file.name}...`);
 
       try {
-        const res = await fetch("/api/games/import/pgn", {
-          method: "POST",
-          body: formData,
-        });
-        const data = await res.json();
+        const text = await file.text();
+        const games = parsePgnText(text);
 
-        if (!res.ok) throw new Error(data.error || "Upload failed");
+        if (games.length === 0) throw new Error("No valid games found in file");
 
+        addGames(games);
         setStatus("success");
-        setMessage(`Imported ${data.count} game(s) from ${file.name}`);
+        setMessage(`Loaded ${games.length} game(s) from ${file.name}`);
         setTimeout(() => router.push("/games"), 1500);
       } catch (error: any) {
         setStatus("error");
-        setMessage(error.message || "Upload failed");
+        setMessage(error.message || "Parse failed");
       }
     },
-    [router]
+    [router, addGames]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -152,21 +154,70 @@ function FenImport() {
 }
 
 function LichessSync() {
+  const [username, setUsername] = useState("");
   const [status, setStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
+  const router = useRouter();
+  const addGames = useImportedGames((s) => s.addGames);
 
   const handleSync = async () => {
+    const name = username.trim();
+    if (!name) return;
+
     setStatus("syncing");
     setMessage("Fetching games from Lichess...");
 
     try {
-      const res = await fetch("/api/games/import/lichess", { method: "POST" });
-      const data = await res.json();
+      // Call Lichess public API directly — no auth needed
+      const res = await fetch(
+        `https://lichess.org/api/games/user/${encodeURIComponent(name)}?max=50&rated=true&pgnInJson=true&opening=true`,
+        { headers: { Accept: "application/x-ndjson" } }
+      );
 
-      if (!res.ok) throw new Error(data.error || "Sync failed");
+      if (res.status === 404) throw new Error(`Lichess user "${name}" not found`);
+      if (!res.ok) throw new Error(`Lichess API error (${res.status})`);
 
+      const text = await res.text();
+      const lines = text.trim().split("\n").filter(Boolean);
+      const games: any[] = [];
+
+      for (const line of lines) {
+        try {
+          const data = JSON.parse(line);
+          if (data.pgn) {
+            const players = data.players || {};
+            const white = players.white?.user?.name || "Anonymous";
+            const black = players.black?.user?.name || "Anonymous";
+            const whiteElo = players.white?.rating;
+            const blackElo = players.black?.rating;
+            const winner = data.winner;
+            const result = winner === "white" ? "1-0" : winner === "black" ? "0-1" : "1/2-1/2";
+            const opening = data.opening || {};
+
+            games.push({
+              id: data.id || `lichess-${Date.now()}-${Math.random()}`,
+              pgn: data.pgn,
+              source: "lichess",
+              white,
+              black,
+              whiteElo,
+              blackElo,
+              result,
+              eco: opening.eco || null,
+              openingName: opening.name || null,
+              timeClass: data.speed || null,
+              playedAt: data.createdAt ? new Date(data.createdAt).toISOString() : null,
+            });
+          }
+        } catch { /* skip malformed lines */ }
+      }
+
+      if (games.length === 0) throw new Error("No games found for this user");
+
+      addGames(games);
       setStatus("success");
-      setMessage(`Imported ${data.imported} new game(s), ${data.skipped} skipped`);
+      setMessage(`Loaded ${games.length} game(s) from Lichess for ${name}`);
+      setTimeout(() => router.push("/games"), 2000);
     } catch (error: any) {
       setStatus("error");
       setMessage(error.message || "Sync failed");
@@ -177,24 +228,32 @@ function LichessSync() {
     <div className="rounded-lg border border-border bg-card p-6">
       <div className="mb-4 flex items-center gap-2">
         <Globe className="h-5 w-5 text-primary" />
-        <h2 className="font-semibold">Lichess Sync</h2>
+        <h2 className="font-semibold">Lichess Import</h2>
       </div>
-      <p className="mb-4 text-sm text-muted-foreground">
-        Automatically import all your rated games from Lichess. Requires sign in
-        with your Lichess account.
+      <p className="mb-3 text-sm text-muted-foreground">
+        Import your rated games directly from Lichess. No login needed — uses the
+        public API.
       </p>
+      <input
+        type="text"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        placeholder="Your Lichess username"
+        onKeyDown={(e) => e.key === "Enter" && handleSync()}
+        className="mb-3 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+      />
       <button
         onClick={handleSync}
-        disabled={status === "syncing"}
-        className="w-full rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-accent transition-colors disabled:opacity-50"
+        disabled={!username.trim() || status === "syncing"}
+        className="w-full rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {status === "syncing" ? (
           <span className="flex items-center justify-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Syncing...
+            Fetching games...
           </span>
         ) : (
-          "Sync from Lichess"
+          "Import from Lichess"
         )}
       </button>
       {status !== "idle" && (
@@ -208,25 +267,77 @@ function ChessComSync() {
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
+  const router = useRouter();
+  const addGames = useImportedGames((s) => s.addGames);
 
   const handleSync = async () => {
-    if (!username.trim()) return;
+    const name = username.trim();
+    if (!name) return;
 
     setStatus("syncing");
-    setMessage("Fetching games from Chess.com...");
+    setMessage("Fetching game archives from Chess.com...");
 
     try {
-      const res = await fetch("/api/games/import/chesscom", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim() }),
-      });
-      const data = await res.json();
+      // Step 1: Get archives list
+      const archivesRes = await fetch(
+        `https://api.chess.com/pub/player/${encodeURIComponent(name)}/games/archives`
+      );
 
-      if (!res.ok) throw new Error(data.error || "Sync failed");
+      if (archivesRes.status === 404) throw new Error(`Chess.com user "${name}" not found`);
+      if (!archivesRes.ok) throw new Error(`Chess.com API error (${archivesRes.status})`);
 
+      const { archives } = await archivesRes.json();
+      if (!archives || archives.length === 0) throw new Error("No game archives found");
+
+      // Step 2: Fetch the last 2 months of games
+      const recentArchives = archives.slice(-2);
+      const allGames: any[] = [];
+
+      for (const archiveUrl of recentArchives) {
+        setMessage(`Fetching games (${allGames.length} so far)...`);
+        try {
+          const res = await fetch(archiveUrl);
+          if (!res.ok) continue;
+          const data = await res.json();
+
+          for (const game of data.games || []) {
+            if (!game.pgn) continue;
+
+            const white = game.white?.username || "Unknown";
+            const black = game.black?.username || "Unknown";
+            const whiteElo = game.white?.rating;
+            const blackElo = game.black?.rating;
+            const whiteResult = game.white?.result;
+            const result =
+              whiteResult === "win" ? "1-0" :
+              game.black?.result === "win" ? "0-1" :
+              whiteResult === "stalemate" || whiteResult === "agreed" || whiteResult === "repetition" || whiteResult === "insufficient" ? "1/2-1/2" :
+              "*";
+
+            allGames.push({
+              id: game.url?.split("/").pop() || `chesscom-${Date.now()}-${Math.random()}`,
+              pgn: game.pgn,
+              source: "chesscom",
+              white,
+              black,
+              whiteElo,
+              blackElo,
+              result,
+              eco: null,
+              openingName: null,
+              timeClass: game.time_class || null,
+              playedAt: game.end_time ? new Date(game.end_time * 1000).toISOString() : null,
+            });
+          }
+        } catch { /* skip failed archives */ }
+      }
+
+      if (allGames.length === 0) throw new Error("No games found for this user");
+
+      addGames(allGames);
       setStatus("success");
-      setMessage(`Imported ${data.imported} new game(s), ${data.skipped} skipped`);
+      setMessage(`Loaded ${allGames.length} game(s) from Chess.com for ${name}`);
+      setTimeout(() => router.push("/games"), 2000);
     } catch (error: any) {
       setStatus("error");
       setMessage(error.message || "Sync failed");
@@ -240,14 +351,15 @@ function ChessComSync() {
         <h2 className="font-semibold">Chess.com Sync</h2>
       </div>
       <p className="mb-3 text-sm text-muted-foreground">
-        Import your games from Chess.com using your username (public API, no
-        login required).
+        Import your games from Chess.com using your username. No login needed —
+        uses the public API.
       </p>
       <input
         type="text"
         value={username}
         onChange={(e) => setUsername(e.target.value)}
         placeholder="Your Chess.com username"
+        onKeyDown={(e) => e.key === "Enter" && handleSync()}
         className="mb-3 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
       />
       <button
@@ -444,4 +556,47 @@ function ChessableImport() {
       )}
     </div>
   );
+}
+
+/** Parse a multi-game PGN string into individual game objects (client-side). */
+function parsePgnText(text: string): ImportedGame[] {
+  const games: ImportedGame[] = [];
+  // Split on double newline before [Event tags
+  const chunks = text.split(/\n\n(?=\[Event )/);
+
+  for (const chunk of chunks) {
+    const trimmed = chunk.trim();
+    if (trimmed.length < 10) continue;
+
+    try {
+      const chess = new Chess();
+      chess.loadPgn(trimmed);
+      const rawHeaders = chess.header();
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(rawHeaders)) {
+        if (v != null) headers[k] = String(v);
+      }
+
+      games.push({
+        id: `pgn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        pgn: trimmed,
+        source: "upload",
+        white: headers.White || "Unknown",
+        black: headers.Black || "Unknown",
+        whiteElo: headers.WhiteElo ? parseInt(headers.WhiteElo) : null,
+        blackElo: headers.BlackElo ? parseInt(headers.BlackElo) : null,
+        result: headers.Result || "*",
+        eco: headers.ECO || null,
+        openingName: headers.Opening || null,
+        timeClass: null,
+        playedAt: headers.Date && headers.Date !== "????.??.??"
+          ? new Date(headers.Date.replace(/\./g, "-")).toISOString()
+          : null,
+      });
+    } catch {
+      // Skip unparseable chunks
+    }
+  }
+
+  return games;
 }
