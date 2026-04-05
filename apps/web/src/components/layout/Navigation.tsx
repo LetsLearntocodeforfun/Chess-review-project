@@ -13,13 +13,18 @@ import {
   LogOut,
   User,
   Compass,
+  Zap,
+  Search,
+  Settings,
 } from "lucide-react";
 
 const navItems = [
   { href: "/games", label: "Games", icon: Crown },
   { href: "/import", label: "Import", icon: Upload },
   { href: "/explorer", label: "Explorer", icon: Compass },
+  { href: "/puzzles", label: "Puzzles", icon: Zap },
   { href: "/repertoire", label: "Repertoire", icon: BookOpen },
+  { href: "/search", label: "Search", icon: Search },
   { href: "/reports", label: "Reports", icon: TrendingUp },
 ];
 
@@ -63,6 +68,12 @@ export function Navigation() {
                 <User className="h-4 w-4" />
                 {session.user?.name || "Player"}
               </span>
+              <Link
+                href="/settings"
+                className="flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                <Settings className="h-4 w-4" />
+              </Link>
               <button
                 onClick={() => signOut()}
                 className="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"

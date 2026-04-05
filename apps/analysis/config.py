@@ -17,12 +17,18 @@ class Settings(BaseSettings):
     # Azure OpenAI
     azure_openai_api_key: str = ""
     azure_openai_endpoint: str = ""
-    azure_openai_deployment: str = "o3-mini"
+    azure_openai_deployment: str = "gpt-4o-mini"
     azure_openai_api_version: str = "2024-12-01-preview"
 
     # Celery
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
+
+    # CORS
+    cors_origins: str = "http://localhost:3000"
+
+    # Syzygy tablebase path (optional — no default)
+    syzygy_path: str = ""
 
     model_config = {"env_file": "../../.env", "extra": "ignore"}
 

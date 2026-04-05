@@ -8,6 +8,12 @@ import {
   Cpu,
   Globe,
   Zap,
+  Compass,
+  GraduationCap,
+  Search,
+  Share2,
+  Database,
+  Settings,
 } from "lucide-react";
 
 const features = [
@@ -15,25 +21,61 @@ const features = [
     icon: Upload,
     title: "Import Games",
     description:
-      "Import from PGN/FEN files, or auto-sync from Lichess and Chess.com accounts.",
+      "Import from PGN/FEN, auto-sync from Lichess and Chess.com, or import from Chessable.",
   },
   {
     icon: Cpu,
-    title: "Stockfish Analysis",
+    title: "Stockfish 18 Analysis",
     description:
-      "Deep engine analysis with Stockfish 18 — identify blunders, mistakes, and missed tactics.",
+      "Unlimited depth 22+ engine analysis — identify blunders, mistakes, and missed tactics — free forever.",
   },
   {
     icon: Brain,
     title: "AI Coaching",
     description:
-      "Azure AI-powered game review with personalized coaching advice, move-by-move.",
+      "Azure AI-powered game review with personalized coaching, move-by-move explanations, and study plans.",
+  },
+  {
+    icon: Zap,
+    title: "Puzzle Trainer",
+    description:
+      "Puzzles generated from YOUR blunders — fix the exact weaknesses you actually have.",
+  },
+  {
+    icon: Compass,
+    title: "Opening Explorer",
+    description:
+      "Explore openings with millions of games from Lichess and master databases, with win rate stats.",
   },
   {
     icon: BookOpen,
     title: "Opening Repertoire",
     description:
-      "Build, organize, and train your opening repertoire with interactive move trees.",
+      "Build, organize, and train your opening repertoire. Import full courses from Chessable.",
+  },
+  {
+    icon: Database,
+    title: "Endgame Tablebase",
+    description:
+      "Perfect play for endgames with 7 or fewer pieces via Syzygy tablebases — know every move is optimal.",
+  },
+  {
+    icon: Search,
+    title: "Advanced Search",
+    description:
+      "Filter games by opponent, opening, time control, accuracy, date range, and blunder count.",
+  },
+  {
+    icon: Share2,
+    title: "Share Analysis",
+    description:
+      "Share analyzed games with anyone via unique links — no login required to view.",
+  },
+  {
+    icon: Settings,
+    title: "Customizable",
+    description:
+      "Board themes, piece sets, engine depth, animation speed — make it yours.",
   },
   {
     icon: TrendingUp,

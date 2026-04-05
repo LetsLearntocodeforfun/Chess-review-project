@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
   transpilePackages: ["@chesslens/shared"],
-  experimental: {
-    serverComponentsExternalPackages: ["@prisma/client"],
-  },
 };
 
 module.exports = nextConfig;

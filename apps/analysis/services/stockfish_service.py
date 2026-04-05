@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
+from io import StringIO
 
 import chess
 import chess.engine
 import chess.pgn
-from io import StringIO
 
 from config import settings
 from models.schemas import MoveEvalResult
@@ -37,38 +37,49 @@ def classify_move(cp_loss: float) -> str:
     return "blunder"
 
 
-def score_to_cp(score: chess.engine.PovScore, turn: chess.Color) -> tuple[float | None, int | None]:
-    """Convert a PovScore to centipawns from white's perspective.
-    
-    Returns (centipawns, mate_in) tuple. One is always None.
+def _score_to_white_cp(score: chess.engine.PovScore) -> tuple[float | None, int | None]:
+    """Convert a PovScore to centipawns from WHITE's perspective.
+
+    Returns (centipawns, mate_in). Exactly one is None.
     """
-    pov = score.white()
-    if pov.is_mate():
-        return None, pov.mate()
-    return float(pov.score()), None
+    white = score.white()
+    if white.is_mate():
+        return None, white.mate()
+    return float(white.score()), None  # type: ignore[arg-type]
+
+
+def _eval_from_white(cp: float | None, mate: int | None) -> float:
+    """Collapse eval into a single float from white's POV for comparison.
+
+    Mate scores are converted to large values.
+    """
+    if mate is not None:
+        return 100_000.0 if mate > 0 else -100_000.0
+    return cp if cp is not None else 0.0
 
 
 async def analyze_game(pgn_text: str, depth: int | None = None) -> list[MoveEvalResult]:
-    """Analyze a complete game with Stockfish and return per-move evaluations.
-    
-    Runs Stockfish as a subprocess via python-chess UCI protocol.
+    """Analyze a game with Stockfish. Returns per-move evaluations.
+
+    Algorithm:
+      1. For each position, engine evaluates BEFORE the player moves.
+      2. Player makes their move → engine evaluates AFTER.
+      3. cp_loss = how much the eval dropped from the mover's perspective.
+         cp_loss = eval_before (mover's view) − eval_after (mover's view)
+         Only positive values count as losses.
     """
     depth = depth or settings.stockfish_depth
 
-    # Parse PGN
     game = chess.pgn.read_game(StringIO(pgn_text))
     if game is None:
         raise ValueError("Invalid PGN: could not parse game")
 
     board = game.board()
     moves = list(game.mainline_moves())
-
     if not moves:
         return []
 
     results: list[MoveEvalResult] = []
-
-    # Open Stockfish engine
     transport, engine = await chess.engine.popen_uci(settings.stockfish_path)
 
     try:
@@ -77,79 +88,49 @@ async def analyze_game(pgn_text: str, depth: int | None = None) -> list[MoveEval
             "Hash": settings.stockfish_hash_mb,
         })
 
-        # Get initial position eval
-        prev_info = await engine.analyse(board, chess.engine.Limit(depth=depth))
-        prev_cp, prev_mate = score_to_cp(prev_info["score"], board.turn)
+        # Evaluate starting position
+        info_before = await engine.analyse(board, chess.engine.Limit(depth=depth))
+        before_cp, before_mate = _score_to_white_cp(info_before["score"])
 
         for i, move in enumerate(moves):
             move_number = (i // 2) + 1
             color = "white" if board.turn == chess.WHITE else "black"
             san = board.san(move)
 
-            # Make the player's move
-            board.push(move)
-            fen_after = board.fen()
+            # Best move in current position (before player moves)
+            best_pv = info_before.get("pv", [])
+            best_move_obj = best_pv[0] if best_pv else move
+            best_move_san = board.san(best_move_obj)
 
-            # Analyze position after move
-            info = await engine.analyse(board, chess.engine.Limit(depth=depth))
-            curr_cp, curr_mate = score_to_cp(info["score"], board.turn)
-
-            # Get best move for the position BEFORE player's move
-            board.pop()
-            best_info = await engine.analyse(board, chess.engine.Limit(depth=depth))
-            best_move_obj = best_info.get("pv", [None])[0]
-            best_move_san = board.san(best_move_obj) if best_move_obj else san
-
-            # PV line (principal variation)
-            pv = best_info.get("pv", [])
-            best_line = []
-            temp_board = board.copy()
-            for pv_move in pv[:5]:  # Show up to 5 moves in PV
+            # Build PV line (up to 5 moves)
+            best_line: list[str] = []
+            temp = board.copy()
+            for pv_move in best_pv[:5]:
                 try:
-                    best_line.append(temp_board.san(pv_move))
-                    temp_board.push(pv_move)
+                    best_line.append(temp.san(pv_move))
+                    temp.push(pv_move)
                 except Exception:
                     break
 
-            # Re-push the player's move
+            # Make player's move
             board.push(move)
+            fen_after = board.fen()
 
-            # Calculate centipawn loss
-            # We need to compare the eval of the best move vs the player's move
-            # from the same side's perspective
-            cp_loss = 0.0
-            if prev_cp is not None and curr_cp is not None:
-                # Both are regular evals
-                # Loss = how much worse the position got compared to best
-                if color == "white":
-                    cp_loss = max(0, prev_cp - (-curr_cp))
-                    # prev_cp was white's advantage before, curr_cp is now from black's perspective
-                    # actually: both score_to_cp return from white's perspective
-                    cp_loss = max(0, prev_cp - (-curr_cp)) if i > 0 else 0
-                else:
-                    cp_loss = max(0, (-prev_cp) - curr_cp)
-            elif prev_mate is not None and curr_mate is None:
-                cp_loss = 300  # Lost a mating sequence
-            elif prev_cp is not None and curr_mate is not None:
-                if (color == "white" and curr_mate < 0) or (color == "black" and curr_mate > 0):
-                    cp_loss = 500  # Allowed mate against us
+            # Evaluate position AFTER player's move
+            info_after = await engine.analyse(board, chess.engine.Limit(depth=depth))
+            after_cp, after_mate = _score_to_white_cp(info_after["score"])
 
-            # Simplified cp_loss: compare best_eval with actual eval
-            best_cp, best_mate = score_to_cp(best_info["score"], board.turn)
-            actual_cp, actual_mate = score_to_cp(info["score"], board.turn)
+            # Compute centipawn loss from the mover's perspective.
+            # Both evals are from white's POV already.
+            # For white: loss = before − after  (higher before = better for white)
+            # For black: loss = after − before   (lower before = better for black)
+            eval_before = _eval_from_white(before_cp, before_mate)
+            eval_after = _eval_from_white(after_cp, after_mate)
 
-            if best_cp is not None and actual_cp is not None:
-                if color == "white":
-                    cp_loss = max(0, best_cp - (-actual_cp))
-                else:
-                    cp_loss = max(0, (-best_cp) - actual_cp)
-            elif best_mate is not None and actual_cp is not None:
-                cp_loss = 300
-            elif best_cp is not None and actual_mate is not None:
-                if (color == "white" and actual_mate < 0) or (
-                    color == "black" and actual_mate > 0
-                ):
-                    cp_loss = 500
+            if color == "white":
+                cp_loss = max(0.0, eval_before - eval_after)
+            else:
+                cp_loss = max(0.0, eval_after - eval_before)
 
             classification = classify_move(cp_loss)
 
@@ -158,6 +139,25 @@ async def analyze_game(pgn_text: str, depth: int | None = None) -> list[MoveEval
                     moveNumber=move_number,
                     color=color,
                     move=san,
+                    fen=fen_after,
+                    evalBefore=before_cp,
+                    evalAfter=after_cp,
+                    mateBefore=before_mate,
+                    mateAfter=after_mate,
+                    bestMove=best_move_san,
+                    bestLine=best_line,
+                    classification=classification,
+                    cpLoss=round(cp_loss, 1),
+                )
+            )
+
+            # Current "after" becomes next move's "before"
+            before_cp = after_cp
+            before_mate = after_mate
+            info_before = info_after
+
+    finally:
+        await engine.quit()
                     fen=fen_after,
                     evalBefore=prev_cp,
                     evalAfter=curr_cp,
